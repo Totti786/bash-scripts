@@ -1,0 +1,75 @@
+#!/bin/bash
+
+## Script to manage Volume Using Pamixer
+
+# Dependencies: `wpctl` `notify-send`
+
+bar_color="$(xrdb -get color13)"
+
+# Get Volume
+get_volume() {
+	volume=$(wpctl get-volume @DEFAULT_SINK@)
+	echo "$volume" | awk '{print $2 * 100 "%"}'
+
+}
+
+notify(){
+	if [[ "$XDG_SESSION_TYPE" == "x11" ]]; then 
+		notify-send -a "Volume" -t 500 -r 69 -h string:x-dunst-stack-tag:volume_notif -h int:value:$(get_volume) -h string:hlcolor:$bar_color "Volume: $(get_volume)"
+	fi
+}
+
+# Increase Volume
+inc_volume() {
+	wpctl set-volume -l 1.5 @DEFAULT_SINK@ 5%+
+	notify
+}
+
+# Decrease Volume
+dec_volume() {
+	wpctl set-volume -l 1.5 @DEFAULT_SINK@ 5%-
+	notify
+}
+
+# Toggle Mute
+toggle_mute() {
+	if wpctl get-volume @DEFAULT_SINK@ | grep -q '\[MUTED\]'; then
+		wpctl set-mute @DEFAULT_SINK@ toggle
+		notify
+	else
+		wpctl set-mute @DEFAULT_SINK@ toggle
+		notify-send -a "Volume" -t 1000 -r 69 "  Mute"
+	fi
+}
+
+# Command-line argument handling
+case "$1" in
+    "--get")
+	    get_volume
+    ;;
+	"--inc")
+    	inc_volume
+    ;;
+	"--dec")
+    	dec_volume
+    ;;
+	"--toggle")
+    	toggle_mute
+    ;;
+	"")
+    	get_volume
+    ;;
+    "--help" | "-h")
+    echo "Usage: ${0##*/} [options] [--]
+	Options:
+	--help		Display this message
+	--toggle	Toggle Mute
+	--get   	Display the current volume
+	--inc  		Increase the volume by 5%
+	--dec		Decrease the volume by 5%"
+    ;;
+    *)
+        echo "Invalid option. Use --help for usage instructions."
+        exit 1
+    ;;
+esac

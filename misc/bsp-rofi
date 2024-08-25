@@ -1,0 +1,12 @@
+#!/bin/bash
+
+if [[ -f "$HOME/.theme" ]]; then source "$HOME/.theme" ; else y="25" ;fi
+if [[ "$bar_style" == "minimal" ]]; then  y="-250" ; else y="25" ;fi
+
+if [[ "$XDG_CURRENT_DESKTOP" == "bspwm" ]]; then 
+	tile=$(bsp-layout layouts | rofi -dmenu -monitor -3 -yoffset $y -width 50% -theme layouts) &&
+	bsp-layout set "$tile"
+elif [[ "$XDG_CURRENT_DESKTOP" == "i3" ]]; then 
+	./.config/i3/i3-resurrect-dmenu
+fi
+

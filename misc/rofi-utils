@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+
+rofi_dir="$HOME/.config/rofi/bin"
+
+# Help section
+show_help() {
+    echo "Usage: ${0##*/} [--]"
+    echo "Options:"
+    echo "  --launch     App launcher"
+    echo "  --shot       Screenshot menu"
+    echo "  --record     Recorder menu"
+    echo "  --power      Power menu"
+    echo "  --network    Netowrk menu"
+    echo "  --help       Show this help message"
+}
+
+# Main script
+case "$1" in
+    "--launch")
+        "$rofi_dir"/rofi-launcher
+		;;
+    "--shot")
+        "$rofi_dir"/rofi-shot
+		;;
+    "--record")
+        "$rofi_dir"/rofi-recorder
+		;;
+    "--power")
+        "$rofi_dir"/rofi-power
+		;;
+    "--network")
+        "$rofi_dir"/network_menu
+		;;
+    "--help" | "-h" | "")
+        show_help 
+		;;
+    *)
+        echo "Invalid option. Use --help for usage instructions."
+        exit 1 
+		;;
+esac

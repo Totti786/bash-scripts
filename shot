@@ -1,0 +1,415 @@
+#!/usr/bin/env bash
+
+## Description:
+# This script is a versatile screenshot utility that supports capturing full-screen, selected areas, 
+# and creating GIFs from multiple screenshots. It offers additional functionalities such as text 
+# extraction with OCR, translation of extracted text, QR code scanning, and uploading images to Imgur. 
+# The script is compatible with both X11 and Wayland environments, including specific features for 
+# Hyprland. It includes options for countdown timers, image editing, and notifications with actionable choices.
+
+## Dependencies:
+# - For X11: scrot, xclip, notify-send (libnotify)
+# - For Wayland: grim, wl-clipboard, slurp, swappy
+# - Optional: tesseract (OCR), zbarimg (QR code scanning), xdg-open, ImageMagick (magick), curl (for Imgur upload)
+# - Optional (for extra features): python-gtts (TTS), translate-shell (translation and language detection)
+
+# Set the current time for naming the screenshot file
+time="$(date +%Y-%m-%d-%H-%M-%S)"
+
+# Define the directory to save screenshots
+dir="$(xdg-user-dir PICTURES)/Screenshots"
+
+# Define the full file path for the screenshot
+file="$dir/Screenshot_${time}.png"
+
+# Create the screenshots directory if it doesn't exist
+[ ! -d "$dir" ] && mkdir -p "$dir"
+
+# Fetch the color from xrdb for customizing slop command (if used for area selection)
+color=$(xrdb -query | awk '/color4/{print $NF; exit}')
+
+# Determine slop command options based on the existence of certain files and running compositors
+if [[ -e "$HOME"/.config/slop/highlight.frag && -e "$HOME"/.config/slop/highlight.vert ]] && [[ "$(pgrep -f 'compton|xcompmgr|picom|compfy')" ]]; then 
+	slop_command=(slop -r highlight -b 5000 -f "%x %y %w %h") 
+else
+	color_slop=$(echo $color | pastel format rgb-float | awk -F'[()]' '{print $2}')
+	slop_command=(slop -c "$color_slop" -b 3 -f "%x %y %w %h")
+fi
+
+# Function to notify the user about the screenshot with options to delete or open it
+notify_user() {
+	if [[ -e "$file" ]]; then
+	# Play sound and send notification with options to delete or open the screenshot
+	#paplay /usr/share/sounds/freedesktop/stereo/screen-capture.oga & disown
+		action=$(notify-send -a "shot" -r 83 -i "$file" "Screenshot Saved" "Click to open" --action="Delete" --action="Open")
+		if [[ "$action"  == "0" ]]; then
+			rm "$file"
+		elif [[ "$action"  == "1" ]]; then
+			xdg-open "$file"
+		fi
+	fi & disown
+}
+
+# Function to provide a countdown timer before taking a screenshot
+countdown() {
+	for sec in $(seq $1 -1 1); do
+		notify-send -a "shot" -t 1000 -u low -r 83 "Countdown" "Taking shot in : $sec"
+		sleep 1
+	done
+	sleep 0.2
+}
+
+# Function to capture a selected area in Wayland using slurp or Hyprland-specific logic
+get_wayland_selection() {
+	if [[ "$XDG_CURRENT_DESKTOP" == "Hyprland" ]]; then
+		geometry="$(echo "$(hyprctl clients -j)" \
+			| jq -r ".[] | select(.workspace.id == "$(hyprctl activewindow -j | jq -r '.workspace.id')\)"" \
+			| jq -r ".at,.size" | jq -s "add" | jq '_nwise(4)' \
+			| jq -r '"\(.[0]),\(.[1]) \(.[2])x\(.[3])"' \
+			| slurp -w 3 -c "$color" -b 00000090 -B 00000090 -o; sleep 0.2)"
+	else
+		geometry="$(slurp -c "$color" -b 00000055; sleep 0.2)"
+	fi
+	
+	[[ "$geometry" ]] || exit 0
+}
+
+# Function to apply ImageMagick effects for enhancing the screenshot
+magic() {
+	magick "$file" +antialias \
+	\( +clone  -alpha extract \
+    -draw 'fill black polygon 0,0 0,20 20,0 fill white circle 20,20 20,0' \
+    \( +clone -flip \) -compose Multiply -composite \
+    \( +clone -flop \) -compose Multiply -composite \
+  	\) -alpha off -compose CopyOpacity -composite "$file"
+
+	magick "$file" \
+	\( +clone -background black -shadow 69x20+0+10 \) \
+	+swap -background none -layers merge +repage "$file"
+}
+
+# Function to take a screenshot of the full screen
+shot() {
+	if [ "$XDG_SESSION_TYPE" == "wayland" ]; then 
+		grim "$file"
+		wl-copy < "$file"
+	else
+		scrot "$file"
+		xclip -selection clipboard -t image/png -i "$file"
+	fi
+	notify_user
+}
+
+# Function to take a screenshot of a selected area
+shot_area() {
+	if [ "$XDG_SESSION_TYPE" == "wayland" ]; then
+		get_wayland_selection
+		grim -g "$geometry" "$file"
+		wl-copy < "$file"
+	else
+		read -r X Y W H < <("${slop_command[@]}")
+		scrot -a ${X},${Y},${W},${H} "$file"
+		xclip -selection clipboard -t image/png -i "$file"
+	fi
+	notify_user
+}
+
+# Function to take a screenshot and open it for editing
+shot_edit() {
+	if [ "$XDG_SESSION_TYPE" == "wayland" ]; then
+		get_wayland_selection
+		grim -g "$geometry" - | swappy -f - -o "$file"
+		wl-copy "$file"
+	else
+		if command -v flameshot > /dev/null 2>&1; then 
+			flameshot gui -p "$file"
+			xclip -selection clipboard -t image/png -i "$file"
+		else
+			read -r X Y W H < <("${slop_command[@]}")
+			scrot -a ${X},${Y},${W},${H} - | swappy -f - -o "$file"
+			xclip -selection clipboard -t image/png -i "$file"
+		fi
+	fi
+	notify_user
+}
+
+# Function to take a screenshot and blur a selected area
+blur_area() {
+    # Take a full screenshot and select the region to blur
+    if [ "$XDG_SESSION_TYPE" == "wayland" ]; then
+		grim "$file"
+		read -r X Y W H < <(slurp -c "$color" -b 00000055 -f "%x %y %w %h")
+	else
+		scrot "$file"
+		read -r X Y W H < <("${slop_command[@]}")
+	fi
+    
+    # Blur the selected region and save back to the original file
+    magick "$file" -region ${W}x${H}+${X}+${Y} -blur 0x8 "$file"
+    
+    # Copy the modified image to the clipboard
+    if [ "$XDG_SESSION_TYPE" == "wayland" ]; then
+        wl-copy < "$file"
+    else
+        xclip -selection clipboard -t image/png -i "$file"
+    fi
+    
+    notify_user
+}
+
+# Function to extract text from a screenshot using OCR
+shot_extract_text() {
+	if [ "$XDG_SESSION_TYPE" == "wayland" ]; then
+		get_wayland_selection
+		text="$(grim -g "$geometry" - | magick - -colorspace Gray -normalize -sharpen 0x1 -contrast-stretch 2%x2% - | tesseract --dpi 200 - - -l eng+deu)"
+		echo "$text" | wl-copy
+	else
+		read -r X Y W H < <("${slop_command[@]}")
+		text="$(scrot -a ${X},${Y},${W},${H} - | magick - -colorspace Gray -normalize -sharpen 0x1 -contrast-stretch 2%x2% - | tesseract --dpi 200 - - -l eng+deu)"
+		echo "$text" | xclip -selection clipboard
+	fi
+	
+	if [[ -z "$text" ]]; then  
+		notify-send -a "shot" -r 83 -u low "No Text Found" "Couldn't extract text"
+	else
+		notify-send -a "shot" -r 83 -u low "Extracted Text" "Text copied to clipboard"
+		echo 1
+	fi
+}
+
+# Function to translate the extracted text and read it aloud
+shot_translate() {
+	shot_extract_text
+	
+	if [[ -z "$text" ]]; then exit 1 ;fi
+	original_text="$(echo "$text" | tr -d '\n' | sed 's/\. /.\n/g')"
+	
+	lang="$(echo $original_text | trans -b -identify)"
+
+	target_lang="en"
+
+	translated_text="$(echo "$original_text" | trans -b "$lang":"$target_lang")"
+	
+	zenity --info --title="Original Text" --text="$original_text" >/dev/null 2>&1 & disown
+	zenity --info --title="Translated Text" --text="$translated_text" >/dev/null 2>&1 & disown
+	
+	echo "$translated_text" | gtts-cli - -l "$target_lang" | mpv --force-media-title="Text to Speech" --speed=1.2 -
+}
+
+# Function to read the extracted text aloud
+shot_read() {
+	shot_extract_text
+	
+	lang="$(echo $text | trans -b -identify)"
+	
+	echo "$text" | tr -d '\n' | sed 's/\. /.\n/g' | gtts-cli - -l "$lang" | mpv --force-media-title="Text to Speech" --speed=1.1 - > /dev/null 2>&1
+}
+
+# Function to scan a QR code from a screenshot
+shot_qr() {
+	if ! command -v zbarimg >/dev/null 2>&1;then 
+		notify-send -a "shot" -r 83 -u low "QR Code" "zbar is not installed"
+		exit 1
+	fi
+	
+	if [ "$XDG_SESSION_TYPE" == "wayland" ]; then
+		get_wayland_selection
+		link=$(grim -g "$geometry" - | zbarimg -q --raw -)
+		echo "$link" | wl-copy 
+	else
+		read -r X Y W H < <("${slop_command[@]}")
+		link=$(scrot -a ${X},${Y},${W},${H} - | zbarimg -q --raw -) && 
+		echo "$link" | xclip -selection clipboard
+	fi
+
+	if [ -z "$link" ]; then 
+		notify-send -a "shot" -r 83 -u low "No QR Code Found"
+		exit 1
+	fi 
+	
+	if [ "$(notify-send -a shot -r 83 -u low "QR Code Scanned" "$link" --action="Open Link")"  == "0" ]; then 
+		xdg-open "$link" 
+	fi
+}
+
+# Function to upload a screenshot to Imgur and copy the link to the clipboard
+upload_to_imgur(){
+	if [ -e "$1" ]; then
+	client_id="${IMGUR_CLIENT_ID:-c9a6efb3d7932fd}"
+	
+	upload() {
+	    curl -s -H "Authorization: Client-ID $client_id" -H "Expect: " -F "image=$1" https://api.imgur.com/3/image.xml
+	}
+	
+	while [ $# -gt 0 ]; do
+	    file="$1"
+	    shift
+	
+	    if [[ "$file" =~ ^https?:// ]]; then
+	        response=$(upload "$file" 2>/dev/null)
+	    else
+	        if [ "$file" != "-" -a ! -f "$file" ]; then
+	            echo "File '$file' doesn't exist; skipping" >&2
+       	        notify-send -a "shot" -r 83 -u low "Image Upload" "File '$file' doesn't exist; skipping"
+	            exit 1
+	        fi
+	        response=$(upload "@$file" 2>/dev/null)
+	    fi
+	
+	    if [ $? -ne 0 ] || echo "$response" | grep -q 'success="0"'; then
+	        echo "Upload failed for '$file'" >&2
+	        notify-send -a "shot" -r 83 -u low "Image Upload" "Upload failed for '$file'"
+	        exit 1
+	    fi
+	
+	    url="${response##*<link>}"
+	    url="${url%%</link>*}"
+	    delete_hash="${response##*<deletehash>}"
+	    delete_hash="${delete_hash%%</deletehash>*}"
+	    delete_url="https://imgur.com/delete/$delete_hash"
+	done
+	
+	if [ "$XDG_SESSION_TYPE" == "wayland" ]; then
+		echo "$delete_url" | wl-copy
+		sleep 0.1
+		echo "$url" | wl-copy
+	else
+		echo "$delete_url" | xclip -selection clipboard
+		sleep 0.1
+		echo "$url" | xclip -selection clipboard
+	fi 
+	if [[ "$(notify-send -a shot -r 83 -u low "Image Upload" "$url" --action="Open Link")"  == "0" ]]; then 
+		xdg-open "$url" 
+	fi
+fi
+}
+
+# Notify user about GIF creation
+notify_user_gif() {
+    local file="$1"
+    if [[ -e "$file" ]]; then
+        action=$(notify-send -a shot -r 83 -u low -i "$file" "GIF Saved" "Click to open" --action="Delete" --action="Open")
+        if [[ "$action"  == "0" ]]; then
+            rm "$file"
+        elif [[ "$action"  == "1" ]]; then
+            xdg-open "$file"
+        fi
+    else
+        notify-send -a "shot" -t 1000 -r 83 -u low "GIF Creation Canceled"
+    fi
+}
+
+# Function to capture a series of screenshots
+capture_series() {
+    local interval="$1"
+    local count="$2"
+    local tmp_dir="/tmp/screenshots_series"
+    mkdir -p "$tmp_dir"
+    
+    if [ "$XDG_SESSION_TYPE" == "wayland" ]; then
+        get_wayland_selection
+        [[ -z "$geometry" ]] && exit 1
+    else
+        read -r X Y W H < <("${slop_command[@]}") || exit 1
+    fi
+
+    for i in $(seq -f "%03g" 1 $count); do
+        if [ "$XDG_SESSION_TYPE" == "wayland" ]; then 
+            grim -g "$geometry" "$tmp_dir/screenshot_$i.png"
+        else
+            scrot -a ${X},${Y},${W},${H} "$tmp_dir/screenshot_$i.png"
+        fi
+        sleep "$interval"
+    done
+    create_gif "$tmp_dir"
+    rm -rf "$tmp_dir"
+}
+
+# Function to create a GIF from the captured screenshots
+create_gif() {
+    local input_dir="$1"
+    local output_file="${file%.*}.gif"
+    
+    # Convert images to GIF
+    convert -delay 10 -loop 0 "$input_dir/screenshot_*.png" -fuzz 10% -dither FloydSteinberg "$output_file"
+
+    notify_user_gif "$output_file"
+}
+
+# Check dependencies
+check_dependencies() {
+    command -v scrot >/dev/null 2>&1 || { echo >&2 "scrot is required but not installed. Aborting."; exit 1; }
+    # ... (check other dependencies)
+   	sleep 0.1
+}
+
+# Help section
+show_help() {
+    echo "Usage: ${0##*/} [Options]"
+    echo "Options:"
+    echo "  --now            Take screenshot of the desktop"
+    echo "  --area           Take screenshot of the selected area"
+    echo "  --in5            Take screenshot in 5 seconds"
+    echo "  --blur           Take screenshot and blur selected area"
+    echo "  --text           Extract text from the selected area"
+    echo "  --read           Read text from the selected area"
+    echo "  --trans          Translate and read text from the selected area"
+    echo "  --upload          Take a screenshot and upload to imgur"
+    echo "  --gif            Capture a 10 seconds gif"
+    echo "  --qr             Decode QR code"
+    echo "  --help           Show this help message"
+}
+
+check_dependencies
+
+# Command-line argument handling
+case "$1" in
+    "--now")
+		shot
+    ;;
+	"--area")
+    	shot_area
+    ;;
+	"--edit")
+    	shot_edit
+    ;;
+    "--text")
+	    shot_extract_text
+    ;;
+    "--trans")
+	    shot_translate
+    ;;
+    "--read")
+	    shot_read
+    ;;
+    "--blur")
+	    blur_area
+    ;;
+    "--upload")
+		if [[ "$2" ]]; then
+			upload_to_imgur "$2"
+		else
+			shot_area &&
+			upload_to_imgur "$file"
+	    fi
+    ;;
+    "--qr")
+	    shot_qr
+    ;;
+    "--gif")
+        interval="${2:-0.5}" # Default interval of 0.5 second if not provided
+        count="${3:-20}"   # Default count of 10 screenshots if not provided
+        capture_series "$interval" "$count"
+    ;;
+	"--in5")
+		countdown '5'
+	    shot
+    ;;
+    "--help" | "-h" | "")
+        show_help
+    ;;
+    *)
+        echo "Invalid option. Use --help for usage instructions."
+        exit 1
+    ;;
+esac

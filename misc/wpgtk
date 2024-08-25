@@ -1,0 +1,491 @@
+#!/usr/bin/env bash
+
+# TODO
+# Add support for live wallpapers for both wayland and xorg
+# using xwinwrap and mpvpaper 
+# ffmpeg -i input_video.mp4 -vframes 1 first_frame.png
+# xwinwrap -ni -ov -fs -- mpv -wid WID --loop=inf -quiet input_video.mp4
+# mpvpaper '*' ./Downloads/mylivewallpapers.com-Eren-Titan.mp4
+
+# Color files
+config="$HOME/.config"
+alacritty="$config/alacritty/colors.toml"
+polybar="$config/polybar/colors.ini"
+rofi="$config/rofi/themes/colors.rasi"
+discord="$config/Vencord/themes/theme.css"
+dunst="$config/dunst/dunstrc"
+geany="$config/geany/colorschemes/Pywal.conf"
+copyq="$config/copyq/copyq.conf"
+jgmenu="$config/jgmenu/jgmenurc"
+spotify="$config/spicetify/Themes/pywal/color.ini"
+eww="$config/eww/colors.scss"
+hypr="$config/hypr/colors.conf"
+swaync="$config/swaync/style.css"
+waybar="$HOME/.config/waybar/colors.css"
+Wallpapers="$HOME/Pictures/Wallpapers"
+alpha='FF'
+
+## Change colors
+change_colors(){
+	transparent
+	run &&
+	# polybar	
+	cat > "$polybar" <<- EOF
+		[color]
+		;; main colors
+		background = ${background}$alpha
+		background-alt = ${bg_mix}
+		foreground = $foreground
+		primary = $foreground
+		red = $bright_red
+		green = $bright_green
+		yellow = $bright_yellow
+		blue = $bright_blue
+		magenta = $bright_magenta
+		cyan = $bright_cyan
+		white = $white
+		EOF
+	
+	# rofi
+	cat > "$rofi" <<- EOF
+	/* colors */
+	* {
+		background:       ${bg_mix}$alpha_rofi;
+		background-alt:   ${background};
+		background-blur:  ${background}60;
+		foreground:       ${foreground};
+		selected:         ${red};
+		highlight:        ${yellow};
+		urgent:           ${blue};
+		on:               ${magenta};
+		off:              ${black};
+		red:			  ${bright_red};
+		green:			  ${bright_green};
+		yellow:			  ${bright_yellow};
+		blue:			  ${bright_blue};
+		magenta:		  ${bright_magenta};
+		cyan:			  ${bright_cyan};
+		white:			  ${bright_white};
+	}
+		EOF
+	
+	# alacritty 
+	cat > "$alacritty" <<- EOF 
+	[colors.bright]
+	black =      "$bright_black"
+	red =        "$bright_red"
+	green =      "$bright_green"
+	yellow =     "$bright_yellow"
+	blue =       "$bright_blue"
+	magenta =    "$bright_magenta"
+	cyan =       "$bright_cyan"
+	white =      "$bright_white"
+	
+	[colors.cursor]
+	text =      "$black"
+	cursor =    "$white"
+	
+	[colors.normal]
+	black =      "$black"
+	red =        "$red"
+	green =      "$green"
+	yellow =     "$yellow"
+	blue =       "$blue"
+	magenta =    "$magenta"
+	cyan =       "$cyan"
+	white =      "$white"
+	
+	[colors.primary]
+	background = "$background"
+	foreground = "$foreground"
+	EOF
+	
+	# geany
+	sed -i "$geany" \
+		-e "s/bg=.*/bg=${background}/g" \
+		-e "s/fg=.*/fg=${foreground}/g" \
+		-e "s/tag_yellow=.*/tag_yellow=${cyan}/g" \
+		-e "s/fold_bg_grey=.*/fold_bg_grey=${background}/g" \
+		-e "s/keyword_orange=.*/keyword_orange=${red}/g" \
+		-e "s/string_green=.*/string_green=${green}/g" \
+		-e "s/margin_bg_grey=.*/margin_bg_grey=${black}/g" \
+		-e "s/margin_fg_grey=.*/margin_fg_grey=${black}/g" \
+		-e "s/error_red=.*/error_red=${magenta}/g" \
+		-e "s/current_line_grey=.*/current_line_grey=${bg_lighter}/g" \
+		-e "s/selection_blue=.*/selection_blue=${white}/g"
+		
+	# copyq 
+	sed -i "$copyq" \
+		-e "s/bg=#.*/bg=${background}/g" \
+		-e "s/alt_bg=#.*/alt_bg=$bg_mix/g" \
+		-e "s/fg=#.*/fg=${foreground}/g" \
+		-e "s/sel_bg=#.*/sel_bg=$cyan/g" \
+		-e "s/sel_fg=#.*/sel_fg${foreground}/g"
+		
+	# dunst
+	sed -i "$dunst" \
+		-e "s/background = .*/background = \"${bg_light}$alpha\"/g" \
+		-e "s/foreground = .*/foreground = \"${foreground}\"/g" \
+		-e "s/highlight = .*/highlight = \"${foreground}\"/g" \
+		-e "s/frame_color = .*/frame_color = \"${green}CF\"/g"
+
+	# jgmenu 
+	sed -i "$jgmenu" \
+		-e "s/color_menu_bg        = .*/color_menu_bg        = ${bg_mix} $alpha_jg/g" \
+		-e "s/color_norm_fg        = .*/color_norm_fg        = ${foreground} 100/g" \
+		-e "s/color_sel_bg         = .*/color_sel_bg         = ${bright_black} 40/g" \
+		-e "s/color_sel_fg         = .*/color_sel_fg         = ${bright_red} 100/g" \
+		-e "s/color_sep_fg         = .*/color_sep_fg         = ${bright_blue} 40/g"
+	
+	# zathura and sioyek
+	reader-colors
+
+	# discord
+	if [[ -f "$discord" ]]; then 
+	sed -i "$discord" \
+		-e "s/--text-2: .*/--text-2: ${bright_white};/g" \
+		-e "s/--text-3: .*/--text-3: ${foreground};/g" \
+		-e "s/--text-4: .*/--text-4: ${foreground};/g" \
+		-e "s/--text-5: .*/--text-5: ${foreground};/g" \
+		-e "s/--accent-1: .*/--accent-1: ${red};/g" \
+		-e "s/--accent-2: .*/--accent-2: ${green};/g" \
+		-e "s/--accent-3: .*/--accent-3: ${blue};/g" \
+		-e "s/--accent-4: .*/--accent-4: ${yellow};/g" \
+		-e "s/--accent-5: .*/--accent-5: ${magenta};/g" \
+		-e "s/--bg-3: .*/--bg-3: ${bg_light};/g" \
+		-e "s/--bg-4: .*/--bg-4: ${bg_mix};/g"
+	fi 
+
+	# spotify
+	# Spotify can be themed using the xrdb backend i.e. ${xrdb:color0:#222}
+	if [[ -f "$spotify" ]]; then 
+	cat > "$spotify" <<- EOF
+	[pywal]
+	text               = ${bright_white:1}
+	subtext            = ${bright_white:1}
+	main               = ${bg_light:1}
+	main-elevated      = ${bg_light:1}
+	highlight          = ${magenta:1}
+	highlight-elevated = ${bright_magenta:1}
+	sidebar            = ${bg_mix:1}
+	player             = ${blue:1}
+	card               = ${green:1}
+	shadow             = ${bright_black:1}
+	selected-row       = ${green:1}
+	button             = ${red:1}
+	button-active      = ${bright_red:1}
+	button-disabled    = ${blue:1}
+	tab-active         = ${yellow:1}
+	notification       = ${cyan:1}
+	notification-error = ${bright_red:1}
+	equalizer          = ${white:1}
+	misc               = ${red:1}
+	EOF
+	fi
+
+	# eww
+	if [[ -f "$eww" ]]; then 
+	[[ "$alpha" == "FF" ]] &&  sed -i "s/\$alpha: 0.3/\$alpha: 1.0/" "$eww" \
+	|| sed -i "s/\$alpha: 1.0/\$alpha: 0.3/" "$eww" 
+	sed -i 	"$eww" \
+		-e "s/\$background: #.*/\$background: ${bg_light};/g" \
+		-e "s/\$bg-alt: #.*/\$bg-alt: ${background};/g" \
+		-e "s/\$fg: #.*/\$fg: ${foreground};/g" \
+		-e "s/\$fg-alt: #.*/\$fg-alt: $white;/g" \
+		-e "s/\$red: #.*/\$red: $bright_red;/g" \
+		-e "s/\$green: #.*/\$green: $bright_green;/g" \
+		-e "s/\$yellow: #.*/\$yellow: $bright_yellow;/g" \
+		-e "s/\$blue: #.*/\$blue: $bright_blue;/g" \
+		-e "s/\$purple: #.*/\$purple: $bright_magenta;/g" \
+		-e "s/\$cyan: #.*/\$cyan: $bright_cyan;/g" \
+		-e "s/\$gray: #.*/\$gray: $bright_black;/g" \
+		-e "s/\$gray-alt: #.*/\$gray-alt: $bright_black;/g"
+	fi
+
+	if [[ -f "$hypr" ]]; then 
+	# hypr
+	cat > "$hypr" <<- EOF 
+		\$black		= ${bright_black:1}aa
+		\$red 		= ${bright_red:1}ff
+		\$green		= ${bright_green:1}ff
+		\$yellow 	= ${bright_yellow:1}ff
+		\$blue 		= ${bright_blue:1}ff
+		\$magenta 	= ${bright_magenta:1}ff
+		\$cyan 		= ${bright_cyan:1}ff
+		\$white     	= ${bright_white:1}ff
+		EOF
+	fi
+
+	# resize and move wallpaper for use by other programs
+	ln -s "$wallpaper" "$HOME"/.config/wpg/wallpapers/ &> /dev/null
+}
+
+transparent(){
+	if [[ "$alpha" == "FF" ]]; then 
+		sed -i "s/opacity =.*/opacity = 1.0/" "${alacritty%/*}/alacritty.toml"
+		sed -i "s/frame_width = .*/frame_width = 0/" "$dunst"
+		alpha_jg="100"
+		alpha_rofi="ff"
+	else 
+		sed -i "s/opacity =.*/opacity = 0.7/" "${alacritty%/*}/alacritty.toml"
+		sed -i "s/frame_width = .*/frame_width = 3/" "$dunst"
+		alpha_jg="$alpha"
+		alpha_rofi="$alpha"
+	fi
+}
+
+# this functions should only be used if you have a system with a seperate home partition 
+# (this is bad)
+lockPerms(){
+	## give the user read and write permissions to the sddm directory
+	if [[ -d "/usr/share/sddm/themes/Chili" ]]; then
+		sudo chgrp -R "$(whoami)" /usr/share/sddm/
+		sudo chmod -R ug+rwX  /usr/share/sddm/
+	else
+		echo "Can't find a compatible sddm theme"
+	fi
+}
+
+# this funcction only works after using the lockPerms function
+copyWal(){
+	# copy background to sddm theme
+	if [[ -d "/usr/share/sddm/themes/Chili" ]]; then
+		cp "$wallpaper" "/usr/share/sddm/themes/Chili/components/artwork/background.jpg"
+	else
+		echo "Can't find a compatible sddm theme"
+	fi
+}
+
+## Kill already running process
+restart(){
+	local cmd="$1"
+    shift
+	if [[ "$(pidof $cmd)" ]]; then
+		killall "$cmd" && sleep 0.5
+        "$cmd" "$@" & disown
+	else 
+        "$cmd" "$@" & disown
+	fi
+}
+	
+## Check if the command exists and then runs it
+check(){
+	local cmd="$1"
+    shift
+    if command -v "$cmd" >/dev/null 2>&1; then
+        "$cmd" "$@" & disown
+    fi
+}
+
+wall() {
+    if [[ -z "$1" ]]; then
+        echo "No image was selected"
+        exit
+    fi
+
+    local wallpaper="$1"
+    local type="${wallpaper##*.}"
+
+    if [[ "$type" == "mp4" || "$type" == "gif" ]]; then
+        local wall="$HOME/.cache/wall/${wallpaper##*/}.png"
+        [[ ! -f "$wall" ]] && ffmpeg -y -i "$wallpaper" -vframes 1 "$wall" &> /dev/null
+        if [[ "$XDG_SESSION_TYPE" == "x11" ]]; then
+			[[ "$(pgrep xwinwrap)" ]] && pkill xwinwrap
+            xwinwrap -ni -ovr -- mpv -wid WID --loop=inf -quiet "$wallpaper" &
+        elif [[ "$XDG_SESSION_TYPE" == "wayland" ]]; then
+			[[ "$(pgrep mpvpaper)" ]] && pkill mpvpaper
+            mpvpaper -o "no-audio --loop-playlist"  '*' "$wallpaper" &
+        fi
+    else
+		local wall="$wallpaper"
+	    if [[ "$XDG_SESSION_TYPE" == "x11" ]]; then
+			feh --no-fehbg --bg-fill "$wall"
+		elif [[ "$XDG_SESSION_TYPE" == "wayland" ]]; then
+            swww query || swww-daemon -q & disown
+			swww img "$wall" \
+				--transition-fps 60 \
+			    --transition-type any \
+			    --transition-duration 2 & disown
+	    fi
+    fi
+
+    wpg -A "$wall" && wpg -s "$wall"
+    rm "${wall}_wal_sample.png"
+    exit
+}
+
+restore() {
+	run
+	if [[ "$XDG_SESSION_TYPE" == "x11" ]]; then
+		feh --no-fehbg --bg-fill "$wallpaper"
+	elif [[ "$XDG_SESSION_TYPE" == "wayland" ]]; then
+		swww query || swww-daemon -q & disown
+		if [[ "$(swww query | awk '{print $8}')" != "$wallpaper" ]]; then
+		main &
+		swww img "$wallpaper" \
+			--transition-fps 60 \
+			--transition-type any \
+			--transition-duration 2 & disown
+		fi
+    fi
+}
+
+setup(){
+	images=($(find $Wallpapers -type f \( -iname "*.jpg" -o -iname "*.jpeg" -o -iname "*.png" \)))
+    for ((i=0; i<${#images[@]}; i++)); do
+		wpg -A "${images[i]}" && rm "${images[i]}""_wal_sample.png"
+	done
+}
+
+random(){
+	if [[ "$(ls -A $Wallpapers)" ]]; then 
+		image="$(find "$Wallpapers" -type f \( -iname "*.jpg" -o -iname "*.jpeg" -o -iname "*.png" \) -exec shuf -ezn 1 {} + | xargs -0)"
+		wall "$image"
+	else
+		notify-send -u low -r 43 "No Wallpapers Were Found in:" "~/Pictures/Wallpapers"
+	fi
+}
+
+# this function uses nsxiv or waypaper as wallpaper selector for wpg 
+# to set a wallpaper in nsxiv you should select a wallpaper by pressing "m" and then quitting 
+pick(){
+	if [[ "$(ls -A $Wallpapers)" ]]; then 
+		if command -v waypaper >/dev/null 2>&1; then
+			[[ ! -f "$HOME/.config/waypaper/config.ini" ]] && fix_configs			
+			waypaper
+		else
+			wal=$(nsxiv -torb $Wallpapers)
+			wall "$wal"
+		fi
+	else
+		notify-send -u low -r 43 "No Wallpapers Were Found In:" "~/Pictures/Wallpapers"
+	fi
+}	
+
+dynamic(){
+	dynmaic_wall="$HOME/Pictures/Dynamic"
+	if [[ -d "$dynmaic_wall" ]]; then 
+		ls "$dynmaic_wall"
+		# get current hour
+		if [[ ! -z "$1" ]]; then
+			num=$(($(date +%k)/1))
+			image="$dynmaic_wall/$1/$num"
+
+			# get image format
+			if [[ -f "${image}.png" ]]; then
+				wall "$dynmaic_wall/$1/$num.png"
+			elif [[ -f "${image}.jpg" ]]; then
+				wall "$dynmaic_wall/$1/$num.jpg"
+			fi	
+		fi
+	else
+		echo "Dynamic Wallpapers Not Found!"
+	fi
+}
+	
+## Send a signal to phone to change wallpaper (requires automate to be set up)
+phone(){
+	run
+	if command -v kdeconnect-cli &> /dev/null; then
+		device_id="$(kdeconnect-cli -a --id-only)"
+		if [[ -n "$device_id" ]]; then
+			cp "$wallpaper" /tmp/wallpaper.jpg
+			kdeconnect-cli -d "$device_id" --share /tmp/wallpaper.jpg && 
+			kdeconnect-cli -d "$device_id" --ping
+		fi
+		exit
+	else
+		echo "KDE Connect is not installed"
+	fi
+}
+	
+misc(){
+	if [[ "$XDG_SESSION_TYPE" == "x11" ]]; then 
+		xfconf-query -c xsettings -p /Net/ThemeName -s "Dummy" &&
+		xfconf-query -c xsettings -p /Net/ThemeName -s "FlatColor"
+	
+		conky.sh restart &
+		"$HOME/.config/polybar/launch.sh" &> /dev/null &
+		[[ "$XDG_CURRENT_DESKTOP" == "bspwm" ]] && "$HOME"/.config/bspwm/bsp-border &
+	elif [[ "$XDG_SESSION_TYPE" == "wayland" ]]; then
+		# ags
+		if [[ -d "$HOME/.config/ags/scss/" ]]; then
+			"$HOME"/.config/ags/scripts/color_generation/colorgen.sh "$wallpaper" --apply --smart >/dev/null 2>&1
+	    fi
+	    
+		gsettings set org.gnome.desktop.interface gtk-theme "Dummy"
+		gsettings set org.gnome.desktop.interface gtk-theme "FlatColor"
+		gsettings set org.gnome.desktop.interface color-scheme prefer-dark
+		gsettings set org.gnome.desktop.interface color-scheme prefer-light
+	fi
+}
+
+partial(){
+	change_colors
+	misc
+	pkill dunst; dunst > /dev/null 2>&1 & disown
+	check spicetify -q refresh &
+	check pywalfox update >/dev/null 2>&1 &
+	check razer-cli -a &
+}
+main(){
+	partial
+	papirus-folder.sh ${red} &
+	restart copyq --start-server &
+	copyWal
+	magick "$wallpaper" -scale 20% -blur 0x2 -resize \
+	"$(xdpyinfo | awk '/dimensions/{print $2}')" \
+	"$HOME/.config/wpg/templates/wallpaper.jpg"
+	exit
+}
+
+## Check if wpg is installed and get colors
+run(){
+	if [[ -f "/usr/bin/wpg" ]]; then
+		## check if the files exists and import colors from wpg
+		if [[ -f "$HOME/.cache/wal/colors.sh" ]]; then
+			source "$HOME/.cache/wal/colors.sh"
+			# Normal colors
+			background="$(printf "%s\n" "$background")"
+			foreground="$(printf "%s\n" "$foreground")"
+			black="$(printf "%s\n" "$color0")"
+			red="$(printf "%s\n" "$color1")"
+			green="$(printf "%s\n" "$color2")"
+			yellow="$(printf "%s\n" "$color3")"
+			blue="$(printf "%s\n" "$color4")"
+			magenta="$(printf "%s\n" "$color5")"
+			cyan="$(printf "%s\n" "$color6")"
+			white="$(printf "%s\n" "$color7")"
+			# Bright colors
+			bright_black="$(printf "%s\n" "$color8")"
+			bright_red="$(printf "%s\n" "$color9")"
+			bright_green="$(printf "%s\n" "$color10")"
+			bright_yellow="$(printf "%s\n" "$color11")"
+			bright_blue="$(printf "%s\n" "$color12")"
+			bright_magenta="$(printf "%s\n" "$color13")"
+			bright_cyan="$(printf "%s\n" "$color14")"
+			bright_white="$(printf "%s\n" "$color15")"
+			# Additional colors
+			bg_mix="$(pastel mix -f 0.4 $bright_black $black | pastel format hex)"
+			bg_light="$(pastel mix -f 0.2 $bright_black $black | pastel format hex)"
+			bg_lighter="$(pastel lighten 0.08 $black | pastel format hex)"
+			bg_dark="$(pastel darken 0.02 ${background:1} | pastel format hex)"
+			bg_rgb="$(pastel format rgb ${bg_mix:1})"
+			bg_mix_rgb="$(pastel format rgb ${bg_mix:1})"
+			## merging the Xresources files with the main one
+			xrdb -merge "$HOME"/.cache/wal/colors.Xresources
+		else
+			echo "[!] Theme file not found"
+			exit 1
+		fi 
+	else
+		echo "[!] 'wpgtk' is not installed."
+		echo "Installing from the AUR..." 
+		yay -S wpgtk-git --noconfirm
+		wpgConfig
+		# this command installs rofi, gtk, and openbox themes
+		wpg-install.sh -g -o
+	fi
+}
+
+"$@"
