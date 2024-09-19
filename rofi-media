@@ -1,0 +1,476 @@
+#!/usr/bin/env bash
+
+# Define cache and file paths
+data_dir="$HOME/.local/share/rofi-media"
+shortcuts="$HOME/.local/share/applications/media"
+watchlater_dir="$data_dir/watch_later"
+media_history="$data_dir/media_history.txt"
+config_file="$data_dir/conf.sh"
+fallback_poster="$data_dir/cover.jpg"
+
+# Create necessary directories if they don't exist
+mkdir -p "$shortcuts"
+mkdir -p "$watchlater_dir"
+
+[[ -f "$config_file" ]] && . "${config_file}" || echo  "# rofi-media config file" >> "${config_file}"
+
+[[ -z "$anime_directory" ]] && anime_directory="$HOME/Videos/Anime"
+[[ -z "$movies_directory" ]] && movies_directory="$HOME/Videos/Movies"
+[[ -z "$shows_directory" ]] && shows_directory="$HOME/Videos/Shows"
+[[ -z "$player" ]] && player="mpv"
+[[ -z "$speed" ]] || [[ "$player" == "syncplay" ]] && speed="1.0"
+
+if [[ ! -f "$fallback_poster" ]]; then
+	eval $(xrdb -query | awk '/color0/{print "color0="$NF} /color7/{print "color7="$NF}')
+	magick -size 300x445 xc:"$color0" "$fallback_poster"
+	magick "$fallback_poster" -gravity center -fill "$color7" \
+	-font /usr/share/fonts/TTF/JetBrainsMonoNerdFont-Regular.ttf \
+	-pointsize 90 -annotate 0 "󰿎" "$fallback_poster"
+fi
+
+get_poster(){
+	if [ -z "$1" ]; then
+		echo "Usage: $0 <title> <year (optional)> <type>"
+		exit 1
+	fi
+
+	type="$1"
+	title="$2"
+	year="$3"
+
+	cover_dir="$data_dir/$type"
+	mkdir -p "$cover_dir"
+
+	# Prepare the title argument for the API request
+	encoded_title=$(echo "$title" | tr ' ' '+')
+
+	if [ "$type" == "anime" ]; then
+		# Fetch anime data from Jikan API
+		response=$(curl -s "https://api.jikan.moe/v4/anime?q=$encoded_title&season=$year")
+		poster_url=$(echo "$response" | jq -r '.data[0].images.jpg.large_image_url')
+	else
+		API_KEY="497fd34e"
+		# Fetch movie/show data from OMDB API
+		response=$(curl -s "http://www.omdbapi.com/?t=$encoded_title&year=$year&apikey=$API_KEY")
+		poster_url=$(echo "$response" | jq -r '.Poster')
+	fi
+
+	# Check for errors
+	error_message=$(echo "$response" | jq -r '.Error')
+	if [ "$error_message" != "null" ]; then
+		echo "Error: $error_message"
+		poster_url="N/A"
+	fi
+
+	if [ "$poster_url" == "N/A" ]; then
+		echo "No poster available for '$title', using fallback image."
+		cp "$fallback_poster" "$cover_dir/$title.jpg"
+	else
+		wget -q "$poster_url" -O "$cover_dir/$title.jpg"
+		echo "Poster downloaded as '$cover_dir/$title.jpg'"
+	fi
+}
+
+process_media(){
+	media_type="$1"
+
+	case "$media_type" in
+		"movies")
+			media_directory="$movies_directory"
+			# Find media files directly
+			readarray -t lines < <(find -L "$media_directory" -type f \( -iname "*.mp4" -o -iname "*.mkv" \) | sort)
+			;;
+		"shows" | "anime")
+			exec_command="$0 --episode"
+			media_directory="$([ "$media_type" = "shows" ] && echo "$shows_directory" || echo "$anime_directory")"
+			# Find directories containing media files
+			readarray -t lines < <(find "$media_directory" -mindepth 1 -maxdepth 1 \( -type d -o -type l \) -print0 | while IFS= read -r -d '' dir; do
+				if find -L "$dir" -type f \( -iname "*.mp4" -o -iname "*.mkv" \) -print -quit | grep -q .; then echo "$dir" ;fi done | sort)
+			;;
+		*)
+			echo "Invalid media type specified."
+			exit 1
+			;;
+	esac
+
+	if [[ ${#lines[@]} -eq 0 ]]; then
+		notify-send -r 12 -u low -a rofi-media "rofi-media" "No files were found in $media_directory"
+		return
+	elif [[ ${#lines[@]} -gt "$(ls -1 $data_dir/$media_type/*.jpg | wc -l)" ]]; then
+		notify-send -r 12 -u low -a rofi-media "rofi-media" "Getting posters..."
+	fi
+
+	saved_lines="$data_dir/$media_type/$media_type.txt"
+
+	# Declare an associative array
+	declare -A title_map
+
+	# Read the file line-by-line
+	if [[ -f "$saved_lines" ]]; then 
+		while IFS=$'\t' read -r path title; do
+			# Check if the line contains both a path and a title
+			if [[ -n "$path" && -n "$title" ]]; then
+				title_map["$path"]="$title"
+			fi
+		done < "$saved_lines"
+	fi
+
+	for line in "${lines[@]}"; do
+		if [[ -n "${title_map[$line]}" ]]; then
+			title="${title_map[$line]}"
+	    else
+			# Extract the name of the file from the path
+			name="${line##*/}"
+			# Remove the file extension from the name
+			name="${name%.*}"
+
+			# Extract the year and remove everything after it
+			if [[ "$name" =~ ([1][9][0-9]{2}|20[0-9]{2}) ]]; then
+				# Get the year if present and strip the title of extra info
+				year="${BASH_REMATCH[1]}"
+				title=$(echo "$name" | sed -e "s/$year.*//" -e 's/\[[^]]*\]//g' -e 's/([^)]*)//g' -e 's/{[^}]*}//g' -e 's/[._()]/ /g' -e 's/[[:space:]]\+/ /g' -e 's/^[ \t]*//;s/[ \t]*$//' -e 's/ S[0-9][0-9]*.*//')
+
+				# Check if title is empty or only contains the year
+				if [[ -z "$title" || "$title" =~ ^[[:space:]]*$ ]]; then
+					# If title is empty or only contains spaces, set title to the year itself
+					title="$year"
+				fi
+			else
+				# Remove trailing spaces
+				title=$(echo "$name" | sed -e 's/\[[^]]*\]//g' -e 's/([^)]*)//g' -e 's/{[^}]*}//g' -e 's/[._()]/ /g' -e 's/[[:space:]]\+/ /g' -e 's/^[ \t]*//;s/[ \t]*$//' -e 's/ S[0-9][0-9]*.*//')
+				year=""
+			fi
+
+			printf "%s\t%s\n" "$line" "$title" >> "$saved_lines"
+
+		fi
+
+		# Check if the poster file is missing and download it
+		if ! [[ -f "$data_dir/$media_type/$title.jpg" ]]; then
+			get_poster "$media_type" "$title" "$year" &
+			# Wait for the request to be completed to not exceeded Jikan API rate limit
+			[[ "$media_type" == "anime" ]] && wait
+		fi
+
+		# Set the clean version of the title in the player
+		if [[ "$media_type" == "movies" ]]; then
+			exec_command="mpv --speed=$speed --write-filename-in-watch-later-config --save-position-on-quit"
+			exec_command+=" --title=\"$title\""
+		fi
+
+		# Create a list of used posters
+		used_images+=("$data_dir/$media_type/$title")
+
+		menu_entry="$shortcuts/$title.desktop"
+
+		if [[ ! -f "$menu_entry" ]]; then
+			cat > "$menu_entry" <<- EOF
+			[Desktop Entry]
+			Name=$title
+			Exec=$exec_command "$line"
+			Icon=$data_dir/$media_type/$title.jpg
+			Type=Application
+			Categories=${media_type^}
+			EOF
+		fi
+	done
+
+	# Delete unused posters
+	for cached_image in "$data_dir/$media_type"/*.jpg; do
+		if [[ ! " ${used_images[@]} " =~ " ${cached_image%.*} " ]]; then
+			rm "$cached_image"
+		fi
+	done
+
+	wait
+	rofi -show drun -drun-categories "${media_type^}" -theme rofi-media
+}
+
+prompt_menu(){
+	echo -e "$1" | rofi -dmenu -mesg "$2" -theme-str "#mainbox { children: [ message, listview ]; } #textbox { padding: 24px; }"
+}
+
+get_duration(){
+	while [[ -z "$duration" ]]; do
+		# Check if mpv is running and get the duration
+		duration="$([[ "$(pgrep mpv)" ]] && echo '{"command": ["get_property", "duration"]}' | socat - $ipc_socket 2> /dev/null | awk -F'"data":|,' '{print $2}')"
+		
+		# If duration is still empty, wait for 1 second and try again
+		[[ -z "$duration" ]] && sleep 0.5
+	done
+
+	# Once duration is found, save it to the file
+	printf "%.0f" "$duration" > "$watchlater_dir"/duration
+}
+
+play_media() {
+	local file_path="$1"
+	local start_position="$2"
+	local playlist="$watchlater_dir/episode_list.m3u"
+	ipc_socket="/tmp/mpvsocket"
+
+	[[ -z "$start_position" ]] && start_position="0"
+
+	get_duration &
+
+	if [[ "$player" == "syncplay" ]]; then
+		local episode_list="$(ls -v "${file_path%/*}" | awk -v start="${file_path##*/}" '$0 >= start' > $playlist)"
+
+		syncplay --player-path "$(command -v mpv)" --load-playlist-from-file "$playlist" "$file_path" -- \
+			--speed="$speed" --keep-open=always --watch-later-dir="$watchlater_dir" \
+			--write-filename-in-watch-later-config --save-position-on-quit \
+			--input-ipc-server="$ipc_socket" --start="$start_position" >/dev/null 2>&1
+	elif [[ "$player" == "mpv" ]]; then
+		local episode_list="$(find -L "${file_path%/*}" -maxdepth 1 -type f | sort | awk -v start="$file_path" '$0 >= start' > $playlist)"
+
+		mpv --speed="$speed" --keep-open=always --watch-later-dir="$watchlater_dir" \
+			--write-filename-in-watch-later-config --save-position-on-quit \
+			--input-ipc-server="$ipc_socket" --start="$start_position" "$playlist" >/dev/null 2>&1
+	fi
+}
+
+save_history(){
+	local name="${1##*/}"
+	local name="${name%.*}"
+	local duration="$(cat $watchlater_dir/duration 2> /dev/null)"
+
+	file="$(grep -hB1 "start=" $watchlater_dir/* 2>/dev/null | grep -A2 "$name")"
+	
+	[[ -z "$file" ]] && echo "History File Not Found!" && exit 1
+	
+	position="$(echo $file | awk -F= '/start/ {print int($2)}')"
+	file_path="$(echo $file | awk -F' start=' '/^# / {print substr($1, 3)}')"
+
+	[[ -n "$duration" ]] && local progress=$(($position * 100 / $duration))
+
+	if grep -qw "$name" "$media_history"; then
+		sed -i "/$name/d" "$media_history"
+	fi
+
+	printf "%s\t%s\t%s\t%s\n" "$name" "$position" "$file_path" "$progress" >> "$media_history"
+
+	rm "$watchlater_dir"/*
+}
+
+check_history(){
+	local name="${1##*/}"
+
+	position="$(grep -hw "$name" $media_history | awk -F'\t' '{print $2}')"
+	file_path="$(grep -hw "$name" $media_history | awk -F'\t' '{print $3}')"
+	progress="$(grep -hw "$name" $media_history | awk -F'\t' '{print $4}')"
+	dir="${file_path%/*}"
+	episode=$(echo "${file_path##*/}" | sed -n -e 's/.*[eE]\([0-9]\{2\}\).*/\1/p' -e 's/.*\b\([0-9]\{2\}\)\b.*/\1/p' | head -n1)
+}
+
+prompt(){
+	local show="$1"
+	check_history "$show"
+
+	local episode_number="$episode"
+	local selected_directory="$dir"
+
+	# Check for the next episode in the current season
+	next_episode_number=$(printf '%02d' $((10#$episode_number + 1)))
+	next_episode_file=$(ls -v "$selected_directory" | grep -Ei "([sS][0-9]+[eE]$next_episode_number| - $next_episode_number - | - $next_episode_number\..*|[_\.x-]$next_episode_number\.)")
+
+	if [[ -n "$next_episode_file" ]]; then
+
+		if [[ "$progress" -ge 90 ]]; then 
+			options="$(prompt_menu "Next\nReplay\nSelect\nExit" "Select an option:")"
+		else
+			options="$(prompt_menu "Next\nResume\nReplay\nSelect\nExit" "Select an option:")"
+		fi
+
+		case "$options" in
+		"Next")
+			play_media "$selected_directory/$next_episode_file"
+			save_history "$show"
+			episode_number=$(($episode_number + 1))
+			prompt "$show"
+			;; 
+		"Resume")
+			play_media "$file_path" "$position"
+			save_history "$show"
+			prompt "$show"
+			;;
+		"Replay")
+			play_media "$file_path"
+			save_history "$show"
+			prompt "$show"
+			;;
+		"Select")
+			select_episode "$show"
+			;;
+		"Exit")
+			exit 0
+			::
+		esac
+
+	else
+		# Check if there is another season available
+		parent_directory="${selected_directory%/*}"
+		current_season="${selected_directory##*/}"
+
+		next_season_dir=$(ls -v "$parent_directory" | grep -A1 "$current_season" | tail -n1)
+
+		if [[ -n "$next_season_dir" && "$next_season_dir" != "$current_season" && "$parent_directory" != "$shows_directory" && "$parent_directory" != "$anime_directory" ]]; then
+			next_season_dir="$parent_directory/$next_season_dir"
+			binge_next_season="$(prompt_menu "Yes\nNo" "Next season available. Play next season?")"
+			if [[ "$binge_next_season" == "Yes" ]]; then
+				first_episode_file=$(ls -v "$next_season_dir" | grep -E '\.mp4$|\.mkv$' | head -n1)
+				if [[ -n "$first_episode_file" ]]; then
+					play_media "$next_season_dir/$first_episode_file"
+					save_history "$show"
+					prompt "$show"
+				fi
+			fi
+		fi
+	fi
+
+}
+
+play_history(){
+	local show="$1"
+	check_history "$show"
+
+	if [[ "$progress" -ge 90 ]]; then
+
+		local episode_number="$episode"
+		local selected_directory="$dir"
+
+		# Check for the next episode in the current season
+		next_episode_number=$(printf '%02d' $((10#$episode_number + 1)))
+		next_episode_file=$(ls -v "$selected_directory" | grep -Ei "([sS][0-9]+[eE]$next_episode_number| - $next_episode_number - | - $next_episode_number\..*|[_\.x-]$next_episode_number\.)")
+
+		if [[ -n "$next_episode_file" ]]; then
+			file_path="$selected_directory/$next_episode_file"
+			position=""
+		else 
+			file_path=""
+		fi		
+	fi
+
+	[[ -n "$file_path" ]] && history=$(prompt_menu "Yes\nNo" "Resume from where you left off?")
+
+	if [[ "$history" == "Yes" ]]; then
+		play_media "$file_path" "$position"
+		save_history "$show"
+		[[ -d "$show" ]] &&  prompt "$show"
+		exit 0
+	else
+		if [[ -f "$show" ]]; then
+			play_media "$show"
+			save_history "$show"
+		else
+			select_episode "$show"
+		fi
+	fi
+}
+
+select_episode(){
+	local show="$1"
+
+	# Check if there are multiple season directories, only if there are no video files in the directory
+	[[ -z "$(ls -p "$show" | grep -v / | grep -E '\.mp4$|\.mkv$')" ]] && season_dirs="$(ls -vp "$show" | grep / | sed 's/\///g')"
+
+	if [[ -n "$season_dirs" ]]; then
+	  season=$(prompt_menu "$(echo "$season_dirs" | sed -E '
+	    # Handle "S01P01" -> "Season 1: Part 1" (case-insensitive)
+	    s/.*[sS]0?([1-9][0-9]*)[pP]0?([1-9][0-9]*).*/Season \1: Part \2/; t;
+	    # Handle "Season 3 Part 1" -> "Season 3: Part 1"
+	    s/.*[sS]eason[[:space:]]+([0-9]+)[[:space:]]*-[[:space:]]*Part[[:space:]]+([0-9]+).*/Season \1: Part \2/; t;
+	    # Handle "Season 3 - Part 1" -> "Season 3: Part 1"
+	    s/.*[sS]eason[[:space:]]+([0-9]+)[[:space:]]*-[[:space:]]*Part[[:space:]]+([0-9]+).*/Season \1: Part \2/; t;
+	    # Handle "S01" -> "Season 1" (case-insensitive)
+	    s/.*[sS]0?([1-9][0-9]*).*/Season \1/; t;
+	    # Handle "Season 3" -> "Season 3" (case-insensitive)
+	    s/.*[sS]eason[[:space:]]+([0-9]+).*/Season \1/; t;
+	    # Handle cases with extra information, just keep the name unchanged
+	    s!.*/!!')" "Select the season:")
+
+		[[ -z "$season" ]] && exit 1
+
+	    season_number=$(echo "$season" | grep -oP '(?<=Season\s)\d+')
+	    part_number=$(echo "$season" | grep -oP '(?<=Part\s)\d+')
+
+		if [[ -n "$part_number" ]]; then
+		    # Handle part and season combinations like S01P01, S1P1, Season 1 - Part 1, etc.
+		    season_pattern="([sS]0?$season_number[Pp]0?$part_number|[sS]$season_number[Pp]$part_number|Season[[:space:]]*$season_number[[:space:]]*[-]?[[:space:]]*Part[[:space:]]*$part_number)"
+		else
+		    # Handle regular season formats like S01, Season 1, etc.
+		    season_pattern="([sS]0?$season_number|[sS]$season_number|Season[[:space:]]*$season_number|^0?$season_number$)"
+		fi
+
+		[[ -n "$season_number" ]] && season=$(ls -v "$show" | grep -E -i "$season_pattern" | head -n 1)
+		selected_directory="$show/$season"
+	else
+		selected_directory="$show"
+	fi
+
+	# Extract episode numbers and titles, and format the selection
+	  episode_list="$(ls -p "$selected_directory" | grep -v / | grep -E '\.mp4$|\.mkv$' | sed -E '
+		# Handle [group] tag - remove group name in square brackets, match episodes with S01E01
+		s/\[.*\] .* - [sS][0-9]+[Ee]([0-9]+).*$/Episode \1/; t;
+		# Handle standard episode formats with season and episode numbers, capturing titles after SXXEXX
+		s/.*[sS][0-9]+[Ee]([0-9]+)[^A-Za-z0-9]*([^0-9]+\S[^0-9]+?)[. ]+[^.]+$/Episode \1: \2/; t;
+		s/.*[sS][0-9]+[Ee]([0-9]+)[^A-Za-z0-9]*([^0-9]+\S[^0-9]+?)[. ]+.*$/Episode \1: \2/; t;
+		s/.*[sS][0-9]+[Ee]([0-9]+).*$/Episode \1/; t;
+		# Match complex titles after a number if present, or just extract the title after the last dash
+		s/.* - ([0-9]+[^0-9a-zA-Z]?) - ([^0-9]+?)\..*$/Episode \1: \2/; t;
+		s/.* - ([^0-9]+?) - ([^0-9]+?)\..*$/\2/; t;
+		s/.* - ([0-9]+[^0-9a-zA-Z]?)\..*$/Episode \1/; t;
+		s/.* - Episode ([0-9]+) - ([^0-9]+?)\..*$/Episode \1: \2/; t;
+		s/.* - Episode ([0-9]+)\..*$/Episode \1/; t;
+		s/.*[sS][0-9]+[Ee]([0-9]+)\..*$/Episode \1/; t;
+		# Handle cases where title is complex and episode number is not in the format
+		s/.* - ([^-]+)\..*$/\1/; t;
+		# Fallback for movies or files without episode or season numbers
+		s/.* ([^\/]+)\..*$/\1/' | sed -E 's/\./ /g')"
+
+	if [[ $(echo "$episode_list" | wc -l ) -eq 1 ]]; then
+		selection="$episode_list"
+	else
+		selection=$(echo "$episode_list" | rofi -sort -dmenu -mesg "Select the episode:")
+	fi
+
+	# Map the selected "Episode X: Title" or title without episode number back to the corresponding file name
+	if [[ -n "$selection" ]]; then
+		# Extract episode number if available
+		episode_number=$(echo "$selection" | grep -o '[0-9]\+[^: ]*')
+
+		# Extract title if it's prefixed with "Episode X:"
+		episode_title=$(echo "$selection" | sed -E 's/^Episode [0-9]+[^ ]*: (.+)/\1/; t; s/^Episode [0-9]+[^ ]*//; t')  
+
+		if [[ -n "$episode_title" ]] && ! [[ $selection =~ "Ep" ]]; then
+			# Handle patterns with no episode number, matching by title
+			episode_file=$(ls -p "$selected_directory" | grep -i "$episode_title" | grep -E '\.mp4$|\.mkv$')
+		else
+			# Handle both patterns with episode number
+			episode_file=$(ls -p "$selected_directory" | grep -Ei "([sS][0-9]+[eE]$episode_number| - Episode $episode_number - .*| - Episode $episode_number\..*| - $episode_number - .*| - $episode_number\..*)" | grep -E '\.mp4$|\.mkv$')
+		fi
+
+		if [[ -n "$episode_file" ]]; then
+			play_media "$selected_directory/$episode_file"
+			save_history "$show"
+			prompt "$show"
+		fi
+	fi
+}
+
+case "$1" in
+	--movies|--shows|--anime)
+		process_media "${1#--}" && rm -r "$shortcuts"
+		;;
+	--episode)
+		play_history "$2"
+		;;
+	--clear)
+		rm "$media_history"
+		;;
+	--edit | -e)
+		xdg-open "$config_file"
+		;;
+	*)
+		echo "Invalid option. Use --movies, --shows, --anime, --episode, or --edit."
+		;;
+esac
