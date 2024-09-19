@@ -1,11 +1,12 @@
 # Bash Scripts Repository
 
 This repository contains a collection of Bash scripts for various tasks and utilities. Feel free to explore and use them as needed.
-```
+
 ## Cloning the Repository
 
 To clone this repository to your local machine, use the following command:
 
+```bash
 git clone https://https://github.com/totti786/bash-scripts
 ```
 
